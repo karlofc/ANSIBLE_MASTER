@@ -1,0 +1,2 @@
+[server-jenkins]
+server-jk ansible_host=40.75.4.107

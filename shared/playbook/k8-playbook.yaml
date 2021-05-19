@@ -1,0 +1,178 @@
+---
+- hosts: k8_servers
+  remote_user: root
+  tasks: 
+    - name: Instalar NetFilter
+      command: modprobe br_netfilter
+
+    - name: Crear modules-load.d/k8s.conf
+      copy:
+        dest: "/etc/modules-load.d/k8s.conf"
+        content: |
+          br_netfilter
+
+    - name: Creaar sysctl.d/k8s.conf
+      copy:
+        dest: "/etc/sysctl.d/k8s.conf"
+        content: |
+          net.bridge.bridge-nf-call-ip6tables = 1
+          net.bridge.bridge-nf-call-iptables = 1
+
+    - name: Recargar sysctl
+      command: sysctl --system
+
+    - name: Actualizar packages
+      apt: 
+        update_cache: yes
+
+    - name: Instalar Packages
+      apt: 
+        name: 
+          - apt-transport-https
+          - ca-certificates
+          - curl
+          - gnupg
+          - lsb-release
+        state: present
+
+    - name: Instalar Docker GPG
+      apt_key:
+        url: https://download.docker.com/linux/ubuntu/gpg
+        keyring: /usr/share/keyrings/docker-archive-keyring.gpg
+
+    - name: Agregar Docker Repository
+      apt_repository:
+        repo: deb [arch=amd64 signed-by=/usr/share/keyrings/docker-archive-keyring.gpg] https://download.docker.com/linux/ubuntu bionic stable
+        state: present
+
+    - name: Actualizar packages 2
+      apt: 
+        update_cache: yes
+
+    - name: Instalar Docker Packages
+      apt: 
+        name: 
+          - docker-ce
+          - docker-ce-cli
+          - containerd.io
+        state: present
+
+    - name: Crear daemon.json
+      copy:
+        dest: "/etc/docker/daemon.json"
+        content: |
+          {
+            "exec-opts": ["native.cgroupdriver=systemd"],
+            "log-driver": "json-file",
+            "log-opts": {
+              "max-size": "100m"
+            },
+            "storage-driver": "overlay2"
+          }
+
+    - name: Habilitar Docker
+      command: systemctl enable docker
+
+    - name: Recargar Daemon
+      command: systemctl daemon-reload
+
+    - name: Reiniciar Docker
+      command: systemctl restart docker
+
+    - name: Actualizar packages 3
+      apt: 
+        update_cache: yes
+
+    - name: Instalar Kubernetes GPG
+      apt_key:
+        url: https://packages.cloud.google.com/apt/doc/apt-key.gpg
+        keyring: /usr/share/keyrings/kubernetes-archive-keyring.gpg
+
+    - name: Agregar Kubernetes Repository
+      apt_repository:
+        repo: deb [signed-by=/usr/share/keyrings/kubernetes-archive-keyring.gpg] https://apt.kubernetes.io/ kubernetes-xenial main
+        state: present
+
+    - name: Actualizar packages 4
+      apt: 
+        update_cache: yes
+
+    - name: Instalar Kubernetes Packages
+      apt: 
+        name: 
+          - kubelet
+          - kubeadm
+          - kubectl
+        state: present
+
+    - name: Hold kubelet
+      dpkg_selections:
+        name: kubelet
+        selection: hold
+
+    - name: Hold kubeadm
+      dpkg_selections:
+        name: kubeadm
+        selection: hold
+
+    - name: Hold kubectl
+      dpkg_selections:
+        name: kubectl
+        selection: hold
+
+- hosts: k8_master
+  remote_user: vagrant
+  gather_facts: false
+  tasks:
+
+    - name: Crear .kube directory
+      file:
+        path: $HOME/.kube
+        state: directory
+        mode: 0755
+
+- hosts: k8_master
+  remote_user: root
+  gather_facts: false
+  tasks:
+    - name: Disahabilitar SWAP
+      shell: swapoff -a
+
+    - name: Init Kubernetes Cluster
+      shell: kubeadm init --pod-network-cidr 10.244.0.0/16 --apiserver-advertise-address=192.168.56.3 >> init_cluster.txt
+      args:
+        chdir: $HOME
+        creates: init_cluster.txt
+
+    - name: Copiar admin.conf a user's kube config
+      copy:
+        src: /etc/kubernetes/admin.conf
+        dest: /home/vagrant/.kube/config
+        remote_src: yes
+        owner: vagrant
+
+    - name: Obtener join command
+      shell: kubeadm token create --print-join-command
+      register: join_command_raw
+
+    - name: Setear join command
+      set_fact:
+        join_command: "{{ join_command_raw.stdout_lines[0] }}"
+
+- hosts: k8_nodes
+  remote_user: vagrant
+  tasks:
+    - name: Instalar Pod Network
+      shell: kubectl apply -f https://raw.githubusercontent.com/coreos/flannel/master/Documentation/kube-flannel.yml
+      
+- hosts: k8_nodes
+  remote_user: root
+  tasks:
+    - name: Deshabilitar SWAP
+      shell: swapoff -a
+    - name: Join cluster
+      shell: "{{ hostvars['k8_master'].join_command }} >> node_joined.txt"
+      args:
+        chdir: $HOME
+        creates: node_joined.txt
+    

@@ -1,0 +1,30 @@
+---
+- hosts: server-jenkins
+  remote_user: root
+  tasks: 
+    - name: Instalar java
+      apt: 
+        name: openjdk-8-jdk 
+        state: present
+    - name: Agregar Jenkins key
+      apt_key:
+        url: "https://pkg.jenkins.io/debian-stable/jenkins.io.key"
+        state: present
+    - name: Agregar Jenkins repository
+      apt_repository:
+        repo: 'deb https://pkg.jenkins.io/debian-stable binary/'
+        state: present
+    - name: Instalar Jenkins
+      apt: 
+        name: jenkins 
+        state: present
+    - name: Esperar por archivo incial
+      wait_for:
+        path: /var/lib/jenkins/secrets/initialAdminPassword
+    - name: Buscando password inicial Jenkins
+      ansible.builtin.slurp:
+        src: /var/lib/jenkins/secrets/initialAdminPassword
+      register: initialPass
+    - name: Imprimiendo password inicial Jenkins
+      ansible.builtin.debug:
+        msg: "Jenkins Init Pass [{{inventory_hostname}}]: {{ initialPass['content'] | b64decode }}"

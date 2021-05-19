@@ -1,0 +1,15 @@
+# K8 Servers
+k8-master ansible_host=192.168.56.3
+k8-node01 ansible_host=192.168.56.4
+k8-node02 ansible_host=192.168.56.5
+
+[k8_master]
+k8-master
+
+[k8_nodes]
+k8-node01
+k8-node02
+
+[k8_servers:children]
+k8_master
+k8_nodes
